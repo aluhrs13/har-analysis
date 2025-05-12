@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0" />
+    <title>HAR Analysis - Request Table</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+        margin: 0;
+        padding: 20px;
+        color: #333;
+        background-color: #f8f9fa;
+      }
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      h1 {
+        text-align: center;
+        margin-bottom: 20px;
+        color: #2c3e50;
+      }
+      .filters {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-bottom: 20px;
+        padding: 15px;
+        background-color: #fff;
+        border-radius: 6px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      }
+      .filter-item {
+        display: flex;
+        align-items: center;
+      }
+      .filter-item label {
+        margin-right: 8px;
+        font-weight: 500;
+      }
+      .table-container {
+        overflow-x: auto;
+        background-color: #fff;
+        border-radius: 6px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 14px;
+      }
+      th,
+      td {
+        padding: 10px 15px;
+        text-align: left;
+        border-bottom: 1px solid #e9ecef;
+      }
+      th {
+        background-color: #f8f9fa;
+        position: sticky;
+        top: 0;
+        cursor: pointer;
+        user-select: none;
+      }
+      th:hover {
+        background-color: #e9ecef;
+      }
+      tr:hover {
+        background-color: #f1f3f5;
+      }
+      .sort-icon::after {
+        content: "⇵";
+        margin-left: 5px;
+        opacity: 0.3;
+      }
+      .sort-asc::after {
+        content: "↑";
+        margin-left: 5px;
+        opacity: 1;
+      }
+      .sort-desc::after {
+        content: "↓";
+        margin-left: 5px;
+        opacity: 1;
+      }
+      .url-cell {
+        max-width: 400px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .size-cell,
+      .cpu-cell {
+        text-align: right;
+      }
+      .response-status {
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+      }
+      .response-true {
+        background-color: #d4edda;
+        color: #155724;
+      }
+      .response-false {
+        background-color: #f8d7da;
+        color: #721c24;
+      }
+      .search-box {
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        width: 300px;
+        font-size: 14px;
+      }
+      select {
+        padding: 8px 12px;
+        border: 1px solid #ced4da;
+        border-radius: 4px;
+        background-color: #fff;
+        font-size: 14px;
+      }
+      .pagination {
+        display: flex;
+        justify-content: center;
+        margin-top: 20px;
+        padding: 10px;
+        background-color: #fff;
+        border-radius: 6px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>HAR Analysis - Request Table</h1>
+
+      <div class="filters">
+        <div class="filter-item">
+          <label for="search">Search:</label>
+          <input
+            type="text"
+            id="search"
+            class="search-box"
+            placeholder="Search URLs, MIME types..." />
+        </div>
+        <div class="filter-item">
+          <label for="mimeTypeFilter">MIME Type:</label>
+          <select id="mimeTypeFilter">
+            <option value="all">All Types</option>
+            {% set mimeTypes = [] %} {% for req in requests %} {% if
+            req.mimeType and not mimeTypes.includes(req.mimeType) %} {% set
+            mimeTypes = (mimeTypes.push(req.mimeType), mimeTypes) %} {% endif %}
+            {% endfor %} {% for mimeType in mimeTypes | sort %}
+            <option value="{{ mimeType }}">{{ mimeType }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="filter-item">
+          <label for="responseFilter">Has Response:</label>
+          <select id="responseFilter">
+            <option value="all">All</option>
+            <option value="true">Yes</option>
+            <option value="false">No</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="table-container">
+        <table id="requestsTable">
+          <thead>
+            <tr>
+              <th
+                data-sort="url"
+                class="sort-icon">
+                URL
+              </th>
+              <th
+                data-sort="mimeType"
+                class="sort-icon">
+                MIME Type
+              </th>
+              <th
+                data-sort="size"
+                class="sort-icon">
+                Size (bytes)
+              </th>
+              <th
+                data-sort="hasResponse"
+                class="sort-icon">
+                Has Response
+              </th>
+              <th
+                data-sort="v8compile"
+                class="sort-icon">
+                v8.compile (ms)
+              </th>
+              <th
+                data-sort="functionCall"
+                class="sort-icon">
+                FunctionCall (ms)
+              </th>
+              <th
+                data-sort="evaluateScript"
+                class="sort-icon">
+                EvaluateScript (ms)
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for req in requests %}
+            <tr>
+              <td
+                class="url-cell"
+                title="{{ req.url }}">
+                <a href= "/{{req.id}}">
+                {{ req.url }}
+                </a>
+              </td>
+              <td>{{ req.mimeType }}</td>
+              <td class="size-cell">{{ req.size | default(0) }}</td>
+              <td>
+                <span
+                  class="response-status response-{{ req.hasResponse }}"
+                  >{{ 'Yes' if req.hasResponse else 'No' }}</span
+                >
+              </td>
+              <td class="cpu-cell">
+                {{ req.cpuTimes['v8.compile'] | default(0) }}
+              </td>
+              <td class="cpu-cell">
+                {{ req.cpuTimes.FunctionCall | default(0) }}
+              </td>
+              <td class="cpu-cell">
+                {{ req.cpuTimes.EvaluateScript | default(0) }}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="pagination">
+        <div>
+          <span id="showing-info"
+            >Showing all {{ requests.length }} entries</span
+          >
+        </div>
+      </div>
+    </div>
+
+    <script>
+      document.addEventListener("DOMContentLoaded", function () {
+        // Get table elements
+        const table = document.getElementById("requestsTable");
+        const tbody = table.querySelector("tbody");
+        const headers = table.querySelectorAll("th");
+
+        // Get filter elements
+        const searchInput = document.getElementById("search");
+        const mimeTypeFilter = document.getElementById("mimeTypeFilter");
+        const responseFilter = document.getElementById("responseFilter");
+
+        // Get info element
+        const showingInfo = document.getElementById("showing-info");
+        // Original table data
+        const rows = Array.from(tbody.querySelectorAll("tr"));
+
+        // Filter state
+        let filteredRows = [...rows];
+        // Sort state
+        let sortColumn = "url";
+        let sortDirection = "asc";
+
+        // Apply initial sort
+        sortTable(sortColumn, sortDirection);
+
+        // Add event listeners for sorting
+        headers.forEach((header) => {
+          header.addEventListener("click", () => {
+            const column = header.getAttribute("data-sort");
+            if (sortColumn === column) {
+              sortDirection = sortDirection === "asc" ? "desc" : "asc";
+            } else {
+              sortColumn = column;
+              sortDirection = "asc";
+            }
+
+            // Update header classes
+            headers.forEach((h) => {
+              h.classList.remove("sort-asc", "sort-desc");
+              h.classList.add("sort-icon");
+            });
+
+            header.classList.remove("sort-icon");
+            header.classList.add(
+              sortDirection === "asc" ? "sort-asc" : "sort-desc"
+            );
+
+            // Sort the table
+            sortTable(sortColumn, sortDirection);
+          });
+        });
+
+        // Add event listeners for filtering
+        searchInput.addEventListener("input", filterTable);
+        mimeTypeFilter.addEventListener("change", filterTable);
+        responseFilter.addEventListener("change", filterTable);
+        // Sort function
+        function sortTable(column, direction) {
+          const multiplier = direction === "asc" ? 1 : -1;
+
+          // Sort the original rows array
+          rows.sort((a, b) => {
+            let valueA, valueB;
+
+            if (column === "url" || column === "mimeType") {
+              valueA = a.cells[getColumnIndex(column)].textContent.trim();
+              valueB = b.cells[getColumnIndex(column)].textContent.trim();
+              return valueA.localeCompare(valueB) * multiplier;
+            } else if (
+              column === "size" ||
+              column === "v8compile" ||
+              column === "functionCall" ||
+              column === "evaluateScript"
+            ) {
+              valueA =
+                parseInt(a.cells[getColumnIndex(column)].textContent.trim()) ||
+                0;
+              valueB =
+                parseInt(b.cells[getColumnIndex(column)].textContent.trim()) ||
+                0;
+              return (valueA - valueB) * multiplier;
+            } else if (column === "hasResponse") {
+              valueA =
+                a.cells[getColumnIndex(column)].textContent.trim() === "Yes";
+              valueB =
+                b.cells[getColumnIndex(column)].textContent.trim() === "Yes";
+              return (valueA === valueB ? 0 : valueA ? 1 : -1) * multiplier;
+            }
+            return 0;
+          });
+
+          // Re-filter the table with the new sort
+          filterTable();
+        } // Get column index from column name
+        function getColumnIndex(column) {
+          switch (column) {
+            case "url":
+              return 0;
+            case "mimeType":
+              return 1;
+            case "size":
+              return 2;
+            case "hasResponse":
+              return 3;
+            case "v8compile":
+              return 4;
+            case "functionCall":
+              return 5;
+            case "evaluateScript":
+              return 6;
+            default:
+              return 0;
+          }
+        } // Filter function
+        function filterTable() {
+          const searchTerm = searchInput.value.toLowerCase();
+          const mimeType = mimeTypeFilter.value;
+          const hasResponse = responseFilter.value;
+          // Apply filters
+          filteredRows = rows.filter((row) => {
+            const url = row.cells[0].textContent.toLowerCase();
+            const mime = row.cells[1].textContent;
+            const response = row.cells[3].textContent.trim() === "Yes";
+            const v8compile = row.cells[4].textContent;
+            const functionCall = row.cells[5].textContent;
+            const evaluateScript = row.cells[6].textContent;
+
+            const matchesSearch =
+              url.includes(searchTerm) ||
+              mime.toLowerCase().includes(searchTerm) ||
+              v8compile.includes(searchTerm) ||
+              functionCall.includes(searchTerm) ||
+              evaluateScript.includes(searchTerm);
+            const matchesMime = mimeType === "all" || mime === mimeType;
+            const matchesResponse =
+              hasResponse === "all" ||
+              (hasResponse === "true" && response) ||
+              (hasResponse === "false" && !response);
+
+            return matchesSearch && matchesMime && matchesResponse;
+          });
+
+          // Update showing info
+          showingInfo.textContent =
+            filteredRows.length === 0
+              ? "Showing 0 entries"
+              : `Showing all ${filteredRows.length} entries`;
+
+          // Clear table body
+          tbody.innerHTML = "";
+
+          // Add all filtered rows
+          if (filteredRows.length === 0) {
+            const noResultsRow = document.createElement("tr");
+            const noResultsCell = document.createElement("td");
+            noResultsCell.colSpan = 7;
+            noResultsCell.textContent = "No matching results found";
+            noResultsCell.style.textAlign = "center";
+            noResultsCell.style.padding = "20px";
+            noResultsRow.appendChild(noResultsCell);
+            tbody.appendChild(noResultsRow);
+          } else {
+            filteredRows.forEach((row) => {
+              tbody.appendChild(row.cloneNode(true));
+            });
+          }
+        }
+
+        // Initial filter
+        filterTable();
+      });
+    </script>
+  </body>
+</html>
