@@ -1,5 +1,8 @@
 This project analyzes HAR files with response contents for potential areas of interest in the minified JS and other assets.
 
+## Get a HAR File
+This requires a HAR file that includes response bodies. The best way to get that would be to run [WebPageTest](https://www.webpagetest.org/) on your site with the "Save response bodies" option under the "Advanced" tab of "Advanced Configuration" selected.
+
 ## Run
 
 ```
