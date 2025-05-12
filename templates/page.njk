@@ -69,7 +69,14 @@
       .section {
         margin-bottom: 30px;
       }
+      #monaco-editor-container {
+        height: 75vh;
+        border: 1px solid #ddd;
+        margin-bottom: 20px;
+      }
     </style>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.js"></script>
+
   </head>
   <body>
     <div>
@@ -133,6 +140,69 @@
         {% endif %}
       </table>
     </div>
+
+    {% if request.hasResponse %}
+    <div class="section">
+      <h2>Response Content</h2>
+
+      <div id="monaco-editor-container"></div>
+      
+      <script>
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' }});
+        require(['vs/editor/editor.main'], function() {
+          // Get request ID from URL or pass it from the server
+          const requestFile = "{{ request.id }}.{{request.extension }}";
+          let editor;
+          
+          // Determine the language based on MIME type
+          let language = 'plaintext';
+          const mimeType = "{{ request.mimeType }}";
+          
+          if (mimeType.includes('javascript') || mimeType.includes('js')) {
+            language = 'javascript';
+          } else if (mimeType.includes('html')) {
+            language = 'html';
+          } else if (mimeType.includes('css')) {
+            language = 'css';
+          } else if (mimeType.includes('json')) {
+            language = 'json';
+          } else if (mimeType.includes('xml')) {
+            language = 'xml';
+          }
+          
+          // Create the editor with initial empty content
+          editor = monaco.editor.create(document.getElementById('monaco-editor-container'), {
+            value: "Loading content...",
+            language: language,
+            theme: 'vs',
+            readOnly: false,
+            automaticLayout: true,
+            minimap: {
+              enabled: true
+            },
+            scrollBeyondLastLine: false,
+          });
+          
+          // Fetch the content from the API endpoint
+          fetch(`/responses/${requestFile}`)
+            .then(response => {
+              if (!response.ok) {
+                throw new Error('Failed to load response content');
+              }
+              return response.text();
+            })
+            .then(responseContent => {
+              // Update the editor with the fetched content
+              editor.setValue(responseContent);
+            })
+            .catch(error => {
+              console.error('Error loading response:', error);
+              editor.setValue(`Error loading content: ${error.message}`);
+            });
+        });
+      </script>
+    </div>
+    {% endif %}
 
     {% if request.jsAnalysis %}
 

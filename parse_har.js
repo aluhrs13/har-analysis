@@ -3,6 +3,7 @@ const walk = require("acorn-walk");
 const fs = require("fs");
 const nunjucks = require("nunjucks");
 const path = require("path");
+const prettier = require("prettier");
 
 /*
  *
@@ -218,7 +219,7 @@ function analyzeFile(filePath) {
   };
 }
 
-function parseHarFile(harFilePath, responsesFolder) {
+async function parseHarFile(harFilePath, responsesFolder) {
   try {
     if (fs.existsSync(responsesFolder)) {
       fs.rmSync(responsesFolder, { recursive: true, force: true });
@@ -245,12 +246,12 @@ function parseHarFile(harFilePath, responsesFolder) {
     const entries = harData.log.entries;
     const outputData = [];
 
-    entries.forEach((entry) => {
+    for (const entry of entries) {
       const request = entry.request;
       const response = entry.response;
 
       if (request.method !== "GET" || entry.pageref !== first_page_id) {
-        return;
+        continue;
       }
 
       req = {
@@ -295,9 +296,22 @@ function parseHarFile(harFilePath, responsesFolder) {
 
         const responseFileName = `${entry._id}.${extension}`;
         const responseFilePath = path.join(responsesFolder, responseFileName);
-        fs.writeFileSync(responseFilePath, response.content.text, "utf8");
+        
+        // Try to format content with Prettier if the file type is supported
+        let formattedContent = response.content.text;
+        try {
+          // Only format files Prettier can handle
+          if (['js', 'json', 'css', 'html', 'svg', 'xml'].includes(extension)) {
+            formattedContent = await prettier.format(response.content.text, {
+              filepath: responseFilePath, // Let Prettier infer parser from file path
+            });
+          }
+        } catch (error) {
+          console.log(`Could not format ${responseFileName}: ${error.message}`);
+        }
+        fs.writeFileSync(responseFilePath, formattedContent, "utf8");
       }
-    });
+    };
 
     return outputData;
   } catch (error) {
@@ -343,38 +357,40 @@ nunjucks.configure(path.join(__dirname, "templates"), {
   autoescape: true,
 });
 
-const harFile = process.argv[2];
-if (!harFile) {
-  console.error("Please provide a HAR file path as an argument");
-  console.error("Usage: node parse_har.js path/to/file.har");
-  process.exit(1);
-}
-
-const inputFilename = path.basename(harFile, path.extname(harFile));
-const outputFolder = path.join("output", inputFilename);
-
-if (fs.existsSync(outputFolder)) {
-  fs.rmSync(outputFolder, { recursive: true, force: true });
-}
-fs.mkdirSync(outputFolder, { recursive: true });
-
-const responsesFolder = path.join(outputFolder, "responses");
-
-files = parseHarFile(harFile, responsesFolder);
-
-files.forEach((file) => {
-  //TODO: Handle other filetypes
-  if (file.hasResponse && file.extension === "js") {
-    console.log(`Analyzing file: ${file.id}`);
-    file.jsAnalysis = analyzeFile(
-      path.join(responsesFolder, file.id +"."+ file.extension)
-    );
+(async () => {
+  const harFile = process.argv[2];
+  if (!harFile) {
+    console.error("Please provide a HAR file path as an argument");
+    console.error("Usage: node parse_har.js path/to/file.har");
+    process.exit(1);
   }
-});
 
-// Write requests.json
-const outputFilePath = path.join(outputFolder, "requests.json");
-fs.writeFileSync(outputFilePath, JSON.stringify(files, null, 2), "utf8");
-console.log(`Successfully wrote ${files.length} requests to ${outputFilePath}`);
+  const inputFilename = path.basename(harFile, path.extname(harFile));
+  const outputFolder = path.join("output", inputFilename);
 
-generatePages(files, outputFolder);
+  if (fs.existsSync(outputFolder)) {
+    fs.rmSync(outputFolder, { recursive: true, force: true });
+  }
+  fs.mkdirSync(outputFolder, { recursive: true });
+
+  const responsesFolder = path.join(outputFolder, "ssg", "responses");
+
+  const files = await parseHarFile(harFile, responsesFolder);
+
+  files.forEach((file) => {
+    //TODO: Handle other filetypes
+    if (file.hasResponse && file.extension === "js") {
+      console.log(`Analyzing file: ${file.id}`);
+      file.jsAnalysis = analyzeFile(
+        path.join(responsesFolder, file.id + "." + file.extension)
+      );
+    }
+  });
+
+  // Write requests.json
+  const outputFilePath = path.join(outputFolder, "requests.json");
+  fs.writeFileSync(outputFilePath, JSON.stringify(files, null, 2), "utf8");
+  console.log(`Successfully wrote ${files.length} requests to ${outputFilePath}`);
+
+  generatePages(files, outputFolder);
+})();
