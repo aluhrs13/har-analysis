@@ -161,14 +161,6 @@
             {% endfor %}
           </select>
         </div>
-        <div class="filter-item">
-          <label for="responseFilter">Has Response:</label>
-          <select id="responseFilter">
-            <option value="all">All</option>
-            <option value="true">Yes</option>
-            <option value="false">No</option>
-          </select>
-        </div>
       </div>
 
       <div class="table-container">
@@ -188,27 +180,32 @@
               <th
                 data-sort="size"
                 class="sort-icon">
-                Size (bytes)
-              </th>
-              <th
-                data-sort="hasResponse"
-                class="sort-icon">
-                Has Response
+                Size (KB)
               </th>
               <th
                 data-sort="v8compile"
                 class="sort-icon">
-                v8.compile (ms)
+                JS Compile (ms)
               </th>
               <th
                 data-sort="functionCall"
                 class="sort-icon">
-                FunctionCall (ms)
+                JS FunctionCall (ms)
               </th>
               <th
                 data-sort="evaluateScript"
                 class="sort-icon">
-                EvaluateScript (ms)
+                JS Evaluation (ms)
+              </th>
+              <th
+                data-sort="imagesCount"
+                class="sort-icon">
+                Discovered Images
+              </th>
+              <th
+                data-sort="otherLiteralsLength"
+                class="sort-icon">
+                Other Strings (chars)
               </th>
             </tr>
           </thead>
@@ -218,18 +215,12 @@
               <td
                 class="url-cell"
                 title="{{ req.url }}">
-                <a href= "/{{req.id}}">
+                <a href= "/pages/{{req.id}}">
                 {{ req.url }}
                 </a>
               </td>
               <td>{{ req.mimeType }}</td>
-              <td class="size-cell">{{ req.size | default(0) }}</td>
-              <td>
-                <span
-                  class="response-status response-{{ req.hasResponse }}"
-                  >{{ 'Yes' if req.hasResponse else 'No' }}</span
-                >
-              </td>
+                <td class="size-cell">{{ (req.size / 1024) | default(0) | round(2) }}</td>
               <td class="cpu-cell">
                 {{ req.cpuTimes['v8.compile'] | default(0) }}
               </td>
@@ -238,6 +229,12 @@
               </td>
               <td class="cpu-cell">
                 {{ req.cpuTimes.EvaluateScript | default(0) }}
+              </td>
+              <td class="cpu-cell">
+                {{ req.jsAnalysis.imagesCount | default(0) if req.jsAnalysis else 0 }}
+              </td>
+              <td class="cpu-cell">
+                {{ req.jsAnalysis.otherLiteralsLength | default(0) if req.jsAnalysis else 0 }}
               </td>
             </tr>
             {% endfor %}
@@ -264,7 +261,6 @@
         // Get filter elements
         const searchInput = document.getElementById("search");
         const mimeTypeFilter = document.getElementById("mimeTypeFilter");
-        const responseFilter = document.getElementById("responseFilter");
 
         // Get info element
         const showingInfo = document.getElementById("showing-info");
@@ -310,7 +306,6 @@
         // Add event listeners for filtering
         searchInput.addEventListener("input", filterTable);
         mimeTypeFilter.addEventListener("change", filterTable);
-        responseFilter.addEventListener("change", filterTable);
         // Sort function
         function sortTable(column, direction) {
           const multiplier = direction === "asc" ? 1 : -1;
@@ -327,7 +322,9 @@
               column === "size" ||
               column === "v8compile" ||
               column === "functionCall" ||
-              column === "evaluateScript"
+              column === "evaluateScript" ||
+              column === "imagesCount" ||
+              column === "otherLiteralsLength"
             ) {
               valueA =
                 parseInt(a.cells[getColumnIndex(column)].textContent.trim()) ||
@@ -336,12 +333,6 @@
                 parseInt(b.cells[getColumnIndex(column)].textContent.trim()) ||
                 0;
               return (valueA - valueB) * multiplier;
-            } else if (column === "hasResponse") {
-              valueA =
-                a.cells[getColumnIndex(column)].textContent.trim() === "Yes";
-              valueB =
-                b.cells[getColumnIndex(column)].textContent.trim() === "Yes";
-              return (valueA === valueB ? 0 : valueA ? 1 : -1) * multiplier;
             }
             return 0;
           });
@@ -357,14 +348,16 @@
               return 1;
             case "size":
               return 2;
-            case "hasResponse":
-              return 3;
             case "v8compile":
-              return 4;
+              return 3;
             case "functionCall":
-              return 5;
+              return 4;
             case "evaluateScript":
+              return 5;
+            case "imagesCount":
               return 6;
+            case "otherLiteralsLength":
+              return 7;
             default:
               return 0;
           }
@@ -372,29 +365,27 @@
         function filterTable() {
           const searchTerm = searchInput.value.toLowerCase();
           const mimeType = mimeTypeFilter.value;
-          const hasResponse = responseFilter.value;
           // Apply filters
           filteredRows = rows.filter((row) => {
             const url = row.cells[0].textContent.toLowerCase();
             const mime = row.cells[1].textContent;
-            const response = row.cells[3].textContent.trim() === "Yes";
-            const v8compile = row.cells[4].textContent;
-            const functionCall = row.cells[5].textContent;
-            const evaluateScript = row.cells[6].textContent;
+            const v8compile = row.cells[3].textContent;
+            const functionCall = row.cells[4].textContent;
+            const evaluateScript = row.cells[5].textContent;
+            const imagesCount = row.cells[6].textContent;
+            const otherLiteralsLength = row.cells[7].textContent;
 
             const matchesSearch =
               url.includes(searchTerm) ||
               mime.toLowerCase().includes(searchTerm) ||
               v8compile.includes(searchTerm) ||
               functionCall.includes(searchTerm) ||
-              evaluateScript.includes(searchTerm);
+              evaluateScript.includes(searchTerm) ||
+              imagesCount.includes(searchTerm) ||
+              otherLiteralsLength.includes(searchTerm);
             const matchesMime = mimeType === "all" || mime === mimeType;
-            const matchesResponse =
-              hasResponse === "all" ||
-              (hasResponse === "true" && response) ||
-              (hasResponse === "false" && !response);
 
-            return matchesSearch && matchesMime && matchesResponse;
+            return matchesSearch && matchesMime;
           });
 
           // Update showing info
@@ -410,7 +401,7 @@
           if (filteredRows.length === 0) {
             const noResultsRow = document.createElement("tr");
             const noResultsCell = document.createElement("td");
-            noResultsCell.colSpan = 7;
+            noResultsCell.colSpan = 8;
             noResultsCell.textContent = "No matching results found";
             noResultsCell.style.textAlign = "center";
             noResultsCell.style.padding = "20px";
