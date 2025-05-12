@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0" />
+    <title>HAR Analysis: {{ request.url }}</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+        margin: 0;
+        padding: 20px;
+        color: #333;
+      }
+      h1,
+      h2,
+      h3 {
+        color: #0066cc;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-bottom: 20px;
+      }
+      th,
+      td {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+      }
+      th {
+        background-color: #f2f2f2;
+        font-weight: bold;
+      }
+      tr:nth-child(even) {
+        background-color: #f9f9f9;
+      }
+      .gallery {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        grid-gap: 15px;
+        margin: 20px 0;
+      }
+      .gallery-item {
+        border: 1px solid #ddd;
+        padding: 10px;
+        border-radius: 4px;
+      }
+      .gallery-item img {
+        max-width: 100%;
+        height: auto;
+      }
+      .image-caption {
+        margin-top: 8px;
+        font-size: 0.9em;
+        color: #666;
+        word-break: break-all;
+      }
+    pre {
+      background-color: #f5f5f5;
+      padding: 10px;
+      border-radius: 4px;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+      .section {
+        margin-bottom: 30px;
+      }
+    </style>
+
+  </head>
+  <body>
+    <div>
+        <a href="/">Back to Index</a>
+    </div>
+    <h1>Image Gallery</h1>
+
+    {% for request in requests %}
+        {% if request.jsAnalysis %}
+            {% if request.jsAnalysis.imagesCount > 0 %}
+                <div class="section">
+                    <h2><a href="/pages/{{ request.id }}">{{ request.url }}</a></h2>
+                    <div class="gallery">
+                        {% for image in request.jsAnalysis.images %}
+                        <div class="gallery-item">
+                            {% if image.type == "base64_image" %}
+                                <img
+                                src="{{ image.content }}"
+                                alt="Image from request" />
+                            {% else %}
+                                {{ image.content | safe }}
+                            {% endif %}
+                            <div class="image-caption"></div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        {% endif %}
+    {% endfor %}
+  </body>
+</html>

@@ -16,84 +16,43 @@ const prettier = require("prettier");
  *
  */
 
-/**
- * Calculates appropriate viewBox dimensions from an SVG path string
- * @param {string} pathData - The SVG path data string
- * @return {Object} Object containing width and height for the viewBox
- */
-//TODO: AI generated, kinda mediocre.
-function calculateViewBoxFromPath(pathData) {
-  // Extract all numeric values from the path
-  const numberMatches = pathData.match(/-?\d*\.?\d+/g);
-  if (!numberMatches) {
-    return { width: 24, height: 24 }; // Default fallback size
-  }
-
-  const numbers = numberMatches.map(Number);
-
-  // Initialize min/max values for x and y coordinates
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let minY = Infinity;
-  let maxY = -Infinity;
-
-  // Step through the numbers assuming they're coordinate pairs
-  for (let i = 0; i < numbers.length; i += 2) {
-    if (i + 1 < numbers.length) {
-      const x = numbers[i];
-      const y = numbers[i + 1];
-
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
-    }
-  }
-
-  // Calculate dimensions with small padding
-  const width = Math.ceil(maxX - minX) || 24;
-  const height = Math.ceil(maxY - minY) || 24;
-
-  // Apply some heuristics for common icon sizes
-  if (width <= 24 && height <= 24) {
-    // If dimensions are close to common icon sizes, round to that size
-    if (width > 16 || height > 16) {
-      return { width: 24, height: 24 };
-    } else {
-      return { width: 16, height: 16 };
-    }
-  }
-
-  // Add a small buffer for better display
-  return {
-    width: Math.ceil(width * 1.1),
-    height: Math.ceil(height * 1.1),
-  };
-}
-
-//TODO: Might still be some oddities with stuff that starts with "M365"
 function handlePathsInJS(str) {
-  const isSvg = /^M\d+(\.\d+)?([ ,]\d+(\.\d+)?)+/i.test(str);
+  // More comprehensive SVG path detection - looks for common SVG path commands
+  const isSvg = /^M\s*[\d.-]+\s*[\d.-]+\s*[aAcClLmMhHvVsSqQtTzZ0-9\s,.-]+$/i.test(str);
 
   if (isSvg) {
-    const { width, height } = calculateViewBoxFromPath(str);
+    try {
+      // Extract all numbers from the path
+      const numbers = str.match(/[+-]?\d+(\.\d+)?/g);
+      
+      // Guard against paths with no valid numbers
+      if (!numbers || numbers.length === 0) {
+        return null;
+      }
+      
+      // Find the maximum value (assuming min is 0 and it's a square)
+      const maxVal = Math.ceil(Math.max(...numbers.map(Number)));
+      
+      // Add a small padding to prevent clipping (20% extra space)
+      const viewBoxSize = Math.max(20, maxVal * 1.2);
+      
+      // Create SVG with styling to fill available space
+      const svgContent =
+        '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ' +
+        `viewBox="0 0 ${viewBoxSize} ${viewBoxSize}" ` +
+        'style="display:block; max-width:100%; max-height:100%;" ' + 
+        'preserveAspectRatio="xMidYMid meet">' +
+        '<path d="' + str + '" fill="currentColor"></path>' +
+        '</svg>';
 
-    const viewBoxWidth = width;
-    const viewBoxHeight = height;
-
-    const svgContent =
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' +
-      viewBoxHeight +
-      " " +
-      viewBoxWidth +
-      '"><path d="' +
-      str +
-      '"></path></svg>';
-
-    return {
-      type: "svg_path",
-      content: svgContent,
-    };
+      return {
+        type: "svg_path",
+        content: svgContent,
+      };
+    } catch (e) {
+      console.log("Error processing SVG path:", e);
+      return null;
+    }
   }
   return null;
 }
@@ -146,60 +105,68 @@ function handleInlineSVGs(str) {
 function analyzeFile(filePath) {
   const fileName = path.basename(filePath);
   const fileContent = fs.readFileSync(filePath, "utf8");
+  console.log(`Analyzing file: ${fileName}`);
 
   //TODO: Code Comments
   //TODO: Sourcemaps
   count_base64_images = 0;
   count_paths_in_js = 0;
   count_inline_svgs = 0;
-
-  const ast = acorn.parse(fileContent, {
-    sourceType: "module",
-    ecmaVersion: 2024,
-  });
-
   literalsList = [];
   imagesList = [];
   otherLiteralsLength = 0;
 
-  walk.simple(ast, {
-    Literal(node) {
-      if (node.value != null && node.value !== "") {
-        if (typeof node.value === "string") {
-          const trimmedStr = node.value.trim();
+  try {
+    const ast = acorn.parse(fileContent, {
+      sourceType: "module",
+      ecmaVersion: 2025,
+      strict: false,
+    });
 
-          const svgPathResult = handlePathsInJS(trimmedStr, count_paths_in_js);
-          if (svgPathResult) {
-            imagesList.push(svgPathResult);
-            count_paths_in_js++;
-          }
+    walk.simple(ast, {
+      Literal(node) {
+        if (node.value != null && node.value !== "") {
+          if (typeof node.value === "string") {
+            const trimmedStr = node.value.trim();
 
-          const base64Result = handleBase64Images(
-            trimmedStr,
-            count_base64_images
-          );
-          if (base64Result) {
-            imagesList.push(base64Result);
-            count_base64_images++;
-          }
+            const svgPathResult = handlePathsInJS(
+              trimmedStr,
+              count_paths_in_js
+            );
+            if (svgPathResult) {
+              imagesList.push(svgPathResult);
+              count_paths_in_js++;
+            }
 
-          const inlineSvgResult = handleInlineSVGs(
-            trimmedStr,
-            count_inline_svgs
-          );
-          if (inlineSvgResult) {
-            imagesList.push(inlineSvgResult);
-            count_inline_svgs++;
-          }
+            const base64Result = handleBase64Images(
+              trimmedStr,
+              count_base64_images
+            );
+            if (base64Result) {
+              imagesList.push(base64Result);
+              count_base64_images++;
+            }
 
-          if (!svgPathResult && !base64Result && !inlineSvgResult) {
-            literalsList.push(trimmedStr);
-            otherLiteralsLength += trimmedStr.length;
+            const inlineSvgResult = handleInlineSVGs(
+              trimmedStr,
+              count_inline_svgs
+            );
+            if (inlineSvgResult) {
+              imagesList.push(inlineSvgResult);
+              count_inline_svgs++;
+            }
+
+            if (!svgPathResult && !base64Result && !inlineSvgResult) {
+              literalsList.push(trimmedStr);
+              otherLiteralsLength += trimmedStr.length;
+            }
           }
         }
-      }
-    },
-  });
+      },
+    });
+  } catch (error) {
+    console.error(`Error analyzing file ${fileName}: ${error.message}`);
+  }
 
   literalsList.sort((a, b) => {
     const strA = String(a);
@@ -296,22 +263,31 @@ async function parseHarFile(harFilePath, responsesFolder) {
 
         const responseFileName = `${entry._id}.${extension}`;
         const responseFilePath = path.join(responsesFolder, responseFileName);
-        
-        // Try to format content with Prettier if the file type is supported
         let formattedContent = response.content.text;
-        try {
-          // Only format files Prettier can handle
-          if (['js', 'json', 'css', 'html', 'svg', 'xml'].includes(extension)) {
-            formattedContent = await prettier.format(response.content.text, {
-              filepath: responseFilePath, // Let Prettier infer parser from file path
-            });
+
+        // Try to format content with Prettier if the file type is supported
+        // Behind a tautical if because it can be slow.
+        if (true){
+          let formattedContent = response.content.text;
+          try {
+            // Only format files Prettier can handle
+            if (
+              ["js", "json", "css", "html", "svg", "xml"].includes(extension)
+            ) {
+              formattedContent = await prettier.format(response.content.text, {
+                filepath: responseFilePath, // Let Prettier infer parser from file path
+              });
+            }
+          } catch (error) {
+            console.log(
+              `Could not format ${responseFileName}: ${error.message}`
+            );
           }
-        } catch (error) {
-          console.log(`Could not format ${responseFileName}: ${error.message}`);
         }
+
         fs.writeFileSync(responseFilePath, formattedContent, "utf8");
       }
-    };
+    }
 
     return outputData;
   } catch (error) {
@@ -338,6 +314,14 @@ async function generatePages(requestsData, outputFolder) {
   });
 
   await fs.promises.writeFile(outputPath, html);
+
+  // Render the template
+  const outputPath3 = path.join(outputFolder, "ssg", "gallery.html");
+  const html3 = nunjucks.render("gallery.njk", {
+    requests: requestsData,
+  });
+
+  await fs.promises.writeFile(outputPath3, html3);
 
   requestsData.forEach(async (request) => {
     const html2 = nunjucks.render("page.njk", {
@@ -390,7 +374,9 @@ nunjucks.configure(path.join(__dirname, "templates"), {
   // Write requests.json
   const outputFilePath = path.join(outputFolder, "requests.json");
   fs.writeFileSync(outputFilePath, JSON.stringify(files, null, 2), "utf8");
-  console.log(`Successfully wrote ${files.length} requests to ${outputFilePath}`);
+  console.log(
+    `Successfully wrote ${files.length} requests to ${outputFilePath}`
+  );
 
   generatePages(files, outputFolder);
 })();
