@@ -234,7 +234,10 @@
         </tr>
         {% for literal in request.jsAnalysis.otherLiterals %}
         <tr>
-          <td><pre>{{ literal }}</pre></td>
+          <td>
+            <span>{{ literal | length }} characters</span>
+            <pre>{{ literal }}</pre>
+          </td>
         </tr>
         {% endfor %}
       </table>

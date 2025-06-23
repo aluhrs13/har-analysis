@@ -184,6 +184,11 @@
                 Size (KB)
               </th>
               <th
+                data-sort="time"
+                class="sort-icon">
+                Time (ms)
+              </th>
+              <th
                 data-sort="v8compile"
                 class="sort-icon">
                 JS Compile (ms)
@@ -221,7 +226,8 @@
                 </a>
               </td>
               <td>{{ req.mimeType }}</td>
-                <td class="size-cell">{{ (req.size / 1024) | default(0) | round(2) }}</td>
+              <td class="size-cell">{{ (req.size / 1024) | default(0) | round(2) }}</td>
+              <td class="cpu-cell">{{ req.time | default(0) }}</td>
               <td class="cpu-cell">
                 {{ req.cpuTimes['v8.compile'] | default(0) }}
               </td>
@@ -321,6 +327,7 @@
               return valueA.localeCompare(valueB) * multiplier;
             } else if (
               column === "size" ||
+              column === "time" ||
               column === "v8compile" ||
               column === "functionCall" ||
               column === "evaluateScript" ||
@@ -349,16 +356,18 @@
               return 1;
             case "size":
               return 2;
-            case "v8compile":
+            case "time":
               return 3;
-            case "functionCall":
+            case "v8compile":
               return 4;
-            case "evaluateScript":
+            case "functionCall":
               return 5;
-            case "imagesCount":
+            case "evaluateScript":
               return 6;
-            case "otherLiteralsLength":
+            case "imagesCount":
               return 7;
+            case "otherLiteralsLength":
+              return 8;
             default:
               return 0;
           }
@@ -370,15 +379,19 @@
           filteredRows = rows.filter((row) => {
             const url = row.cells[0].textContent.toLowerCase();
             const mime = row.cells[1].textContent;
-            const v8compile = row.cells[3].textContent;
-            const functionCall = row.cells[4].textContent;
-            const evaluateScript = row.cells[5].textContent;
-            const imagesCount = row.cells[6].textContent;
-            const otherLiteralsLength = row.cells[7].textContent;
+            const size = row.cells[2].textContent;
+            const time = row.cells[3].textContent;
+            const v8compile = row.cells[4].textContent;
+            const functionCall = row.cells[5].textContent;
+            const evaluateScript = row.cells[6].textContent;
+            const imagesCount = row.cells[7].textContent;
+            const otherLiteralsLength = row.cells[8].textContent;
 
             const matchesSearch =
               url.includes(searchTerm) ||
               mime.toLowerCase().includes(searchTerm) ||
+              size.includes(searchTerm) ||
+              time.includes(searchTerm) ||
               v8compile.includes(searchTerm) ||
               functionCall.includes(searchTerm) ||
               evaluateScript.includes(searchTerm) ||
@@ -402,7 +415,7 @@
           if (filteredRows.length === 0) {
             const noResultsRow = document.createElement("tr");
             const noResultsCell = document.createElement("td");
-            noResultsCell.colSpan = 8;
+            noResultsCell.colSpan = 9;
             noResultsCell.textContent = "No matching results found";
             noResultsCell.style.textAlign = "center";
             noResultsCell.style.padding = "20px";

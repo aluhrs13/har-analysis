@@ -20,6 +20,9 @@ function handlePathsInJS(str) {
   // More comprehensive SVG path detection - looks for common SVG path commands
   const isSvg = /^M\s*[\d.-]+\s*[\d.-]+\s*[aAcClLmMhHvVsSqQtTzZ0-9\s,.-]+$/i.test(str);
 
+  if (str.toLowerCase().startsWith("m365")) {
+    return null;
+  }
   if (isSvg) {
     try {
       // Extract all numbers from the path
@@ -100,6 +103,32 @@ function handleInlineSVGs(str) {
     };
   }
   return null;
+}
+
+function handleLibraries(str){
+  let libs = {};
+
+  if (str.match(/react.production.min.js/)) {
+    libs.react = true;
+  }
+
+  if(str.match(/lodash.*\\.js/)){
+    libs.lodash = true;
+  }
+
+  if(str.match(/https:\/\/reactjs\.org\/docs\//)){
+    libs.react = true;
+  }
+
+  if (str.toLowerCase().includes("lottie")) {
+    libs.lottie = true;
+  }
+
+  if (str.match(/\.Motion\b/)) {
+    libs.motion = true;
+  }
+
+  return libs;
 }
 
 function analyzeFile(filePath) {
@@ -214,6 +243,7 @@ async function parseHarFile(harFilePath, responsesFolder) {
     const outputData = [];
 
     for (const entry of entries) {
+      console.log("Entry")
       const request = entry.request;
       const response = entry.response;
 
@@ -228,6 +258,7 @@ async function parseHarFile(harFilePath, responsesFolder) {
         size: response.content.size,
         cpuTimes: entry._cpuTimes,
         hasResponse: !!response.content.text,
+        time: entry.time
       };
 
       // Save the response content to a file
@@ -261,6 +292,8 @@ async function parseHarFile(harFilePath, responsesFolder) {
         req.extension = extension;
         outputData.push(req);
 
+        req.libraryInfo = handleLibraries(response.content.text);
+
         const responseFileName = `${entry._id}.${extension}`;
         const responseFilePath = path.join(responsesFolder, responseFileName);
         let formattedContent = response.content.text;
@@ -268,7 +301,6 @@ async function parseHarFile(harFilePath, responsesFolder) {
         // Try to format content with Prettier if the file type is supported
         // Behind a tautical if because it can be slow.
         if (true){
-          let formattedContent = response.content.text;
           try {
             // Only format files Prettier can handle
             if (
