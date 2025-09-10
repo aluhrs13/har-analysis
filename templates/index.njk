@@ -213,6 +213,11 @@
                 class="sort-icon">
                 Other Strings (chars)
               </th>
+              <th
+                data-sort="libraryInfo"
+                class="sort-icon">
+                Detected Libraries
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -242,6 +247,19 @@
               </td>
               <td class="cpu-cell">
                 {{ req.jsAnalysis.otherLiteralsLength | default(0) if req.jsAnalysis else 0 }}
+              </td>
+              <td>
+                {% if req.libraryInfo %}
+                  {% set libraries = [] %}
+                  {% for lib, detected in req.libraryInfo %}
+                    {% if detected %}
+                      {% set libraries = (libraries.push(lib), libraries) %}
+                    {% endif %}
+                  {% endfor %}
+                  {{ libraries.join(', ') if libraries.length > 0 else '-' }}
+                {% else %}
+                  -
+                {% endif %}
               </td>
             </tr>
             {% endfor %}
@@ -325,6 +343,10 @@
               valueA = a.cells[getColumnIndex(column)].textContent.trim();
               valueB = b.cells[getColumnIndex(column)].textContent.trim();
               return valueA.localeCompare(valueB) * multiplier;
+            } else if (column === "libraryInfo") {
+              valueA = a.cells[getColumnIndex(column)].textContent.trim();
+              valueB = b.cells[getColumnIndex(column)].textContent.trim();
+              return valueA.localeCompare(valueB) * multiplier;
             } else if (
               column === "size" ||
               column === "time" ||
@@ -368,6 +390,8 @@
               return 7;
             case "otherLiteralsLength":
               return 8;
+            case "libraryInfo":
+              return 9;
             default:
               return 0;
           }
@@ -386,6 +410,7 @@
             const evaluateScript = row.cells[6].textContent;
             const imagesCount = row.cells[7].textContent;
             const otherLiteralsLength = row.cells[8].textContent;
+            const libraryInfo = row.cells[9].textContent;
 
             const matchesSearch =
               url.includes(searchTerm) ||
@@ -396,7 +421,8 @@
               functionCall.includes(searchTerm) ||
               evaluateScript.includes(searchTerm) ||
               imagesCount.includes(searchTerm) ||
-              otherLiteralsLength.includes(searchTerm);
+              otherLiteralsLength.includes(searchTerm) ||
+              libraryInfo.toLowerCase().includes(searchTerm);
             const matchesMime = mimeType === "all" || mime === mimeType;
 
             return matchesSearch && matchesMime;
@@ -415,7 +441,7 @@
           if (filteredRows.length === 0) {
             const noResultsRow = document.createElement("tr");
             const noResultsCell = document.createElement("td");
-            noResultsCell.colSpan = 9;
+            noResultsCell.colSpan = 10;
             noResultsCell.textContent = "No matching results found";
             noResultsCell.style.textAlign = "center";
             noResultsCell.style.padding = "20px";

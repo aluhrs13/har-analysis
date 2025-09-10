@@ -108,8 +108,36 @@ function handleInlineSVGs(str) {
 function handleLibraries(str){
   let libs = {};
 
+  if (str.startsWith("R0lGOD")) {
+    libs.base64gif = true;
+  }
+
+  if (str.startsWith("iVBOR")) {
+    libs.base64png = true;
+  }
+
+  if (str.startsWith("/9j/")) {
+    libs.base64jpg = true;
+  }
+
+  if (str.startsWith("eyJ")) {
+    libs.json = true;
+  }
+
+  if (str.startsWith("PD94")) {
+    libs.base64xml = true;
+  }
+
+  if (str.startsWith("MII")) {
+    libs.base64cert = true;
+  }
+
   if (str.match(/react.production.min.js/)) {
     libs.react = true;
+  }
+
+  if (str.match(/__REACT_DEVTOOLS_GLOBAL_HOOK__/)){
+    libs.react = true
   }
 
   if(str.match(/lodash.*\\.js/)){
@@ -124,8 +152,16 @@ function handleLibraries(str){
     libs.lottie = true;
   }
 
+  if (str.toLowerCase().includes("purify")) {
+    libs.domPurify = true;
+  }
+
   if (str.match(/\.Motion\b/)) {
     libs.motion = true;
+  }
+
+  if (str.match(/mappings:/)) {
+    libs.sourcemaps = true;
   }
 
   return libs;
@@ -134,7 +170,7 @@ function handleLibraries(str){
 function analyzeFile(filePath) {
   const fileName = path.basename(filePath);
   const fileContent = fs.readFileSync(filePath, "utf8");
-  console.log(`Analyzing file: ${fileName}`);
+  //console.log(`Analyzing file: ${fileName}`);
 
   //TODO: Code Comments
   //TODO: Sourcemaps
@@ -243,7 +279,6 @@ async function parseHarFile(harFilePath, responsesFolder) {
     const outputData = [];
 
     for (const entry of entries) {
-      console.log("Entry")
       const request = entry.request;
       const response = entry.response;
 
@@ -281,6 +316,7 @@ async function parseHarFile(harFilePath, responsesFolder) {
           "image/gif": "gif",
           "application/xml": "xml",
           "text/xml": "xml",
+          "application/graphql-response+json": "json"
         };
 
         if (mimeType && mimeTypeMap[mimeType]) {
@@ -318,6 +354,10 @@ async function parseHarFile(harFilePath, responsesFolder) {
         }
 
         fs.writeFileSync(responseFilePath, formattedContent, "utf8");
+      }else{
+        console.log(
+          `No response content for ${req.mimeType} - ${req.url}`
+        );
       }
     }
 
@@ -396,7 +436,7 @@ nunjucks.configure(path.join(__dirname, "templates"), {
   files.forEach((file) => {
     //TODO: Handle other filetypes
     if (file.hasResponse && file.extension === "js") {
-      console.log(`Analyzing file: ${file.id}`);
+      //console.log(`Analyzing file: ${file.id}`);
       file.jsAnalysis = analyzeFile(
         path.join(responsesFolder, file.id + "." + file.extension)
       );
