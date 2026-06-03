@@ -25,25 +25,20 @@ function handlePathsInJS(str) {
   }
   if (isSvg) {
     try {
-      // Extract all numbers from the path
+      // Sanity check: a real path has numeric coordinates.
       const numbers = str.match(/[+-]?\d+(\.\d+)?/g);
-      
-      // Guard against paths with no valid numbers
       if (!numbers || numbers.length === 0) {
         return null;
       }
-      
-      // Find the maximum value (assuming min is 0 and it's a square)
-      const maxVal = Math.ceil(Math.max(...numbers.map(Number)));
-      
-      // Add a small padding to prevent clipping (20% extra space)
-      const viewBoxSize = Math.max(20, maxVal * 1.2);
-      
-      // Create SVG with styling to fill available space
+
+      // Emit a tight, self-scaling SVG. The viewBox here is only a placeholder:
+      // a small client-side script computes each path's real bounding box via
+      // getBBox() and rewrites the viewBox so every icon is framed consistently
+      // regardless of its original coordinate range. preserveAspectRatio keeps
+      // the glyph centered and proportional within its box.
       const svgContent =
-        '<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" ' +
-        `viewBox="0 0 ${viewBoxSize} ${viewBoxSize}" ` +
-        'style="display:block; max-width:100%; max-height:100%;" ' + 
+        '<svg class="svg-autofit" xmlns="http://www.w3.org/2000/svg" ' +
+        'viewBox="0 0 24 24" ' +
         'preserveAspectRatio="xMidYMid meet">' +
         '<path d="' + str + '" fill="currentColor"></path>' +
         '</svg>';

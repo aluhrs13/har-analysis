@@ -52,6 +52,27 @@
         max-width: 100%;
         height: auto;
       }
+      .gallery-item svg.svg-autofit {
+        width: 100%;
+        height: 110px;
+        display: block;
+        color: #333;
+      }
+      .gallery-item svg {
+        max-width: 100%;
+      }
+      .gallery-item audio {
+        width: 100%;
+      }
+      .data-asset {
+        display: inline-block;
+        padding: 8px 10px;
+        background: #f0f0f0;
+        border-radius: 4px;
+        text-decoration: none;
+        color: #0066cc;
+        word-break: break-all;
+      }
       .image-caption {
         margin-top: 8px;
         font-size: 0.9em;
@@ -251,5 +272,50 @@
     {% endif %}
 
 
+    <script>
+      (function () {
+        // Frame each discovered SVG path tightly using its real geometry. The
+        // build emits a placeholder viewBox; the browser knows the true bounds.
+        function fit(svg) {
+          var p = svg.querySelector("path");
+          if (!p) return;
+          var bb;
+          try {
+            bb = p.getBBox();
+          } catch (e) {
+            return;
+          }
+          if (
+            !bb ||
+            !isFinite(bb.width) ||
+            !isFinite(bb.height) ||
+            bb.width === 0 ||
+            bb.height === 0
+          ) {
+            return;
+          }
+          var pad = Math.max(bb.width, bb.height) * 0.08;
+          svg.setAttribute(
+            "viewBox",
+            bb.x - pad +
+              " " +
+              (bb.y - pad) +
+              " " +
+              (bb.width + 2 * pad) +
+              " " +
+              (bb.height + 2 * pad)
+          );
+        }
+        function run() {
+          var list = document.querySelectorAll("svg.svg-autofit");
+          for (var i = 0; i < list.length; i++) fit(list[i]);
+        }
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", run);
+        } else {
+          run();
+        }
+      })();
+    </script>
   </body>
 </html>
