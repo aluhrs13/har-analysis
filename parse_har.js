@@ -115,63 +115,117 @@ function handleInlineSVGs(str) {
   return null;
 }
 
+// Body-type fingerprints: when an entire response body is a base64 blob,
+// the leading characters identify the underlying media/format.
+const BODY_TYPE_SIGNATURES = [
+  { name: "Base64 GIF", prefix: "R0lGOD" },
+  { name: "Base64 PNG", prefix: "iVBOR" },
+  { name: "Base64 JPEG", prefix: "/9j/" },
+  { name: "Base64 JSON", prefix: "eyJ" },
+  { name: "Base64 XML", prefix: "PD94" },
+  { name: "Base64 Certificate", prefix: "MII" },
+];
+
+// Library fingerprints. Each entry is detected when ANY of its patterns match
+// the response text. Patterns are chosen to be unique to the library to keep
+// false positives low (e.g. internal markers, package names, error classes)
+// rather than generic substrings. camelCase/PascalCase markers are matched
+// case-sensitively; generic package names are matched case-insensitively.
+const LIBRARY_SIGNATURES = [
+  // --- View / UI frameworks ---
+  { name: "React", patterns: [/__REACT_DEVTOOLS_GLOBAL_HOOK__/, /react\.production\.min/i, /reactjs\.org\/docs\/error-decoder/i, /__SECRET_INTERNALS_DO_NOT_USE/, /Minified React error/i] },
+  { name: "ReactDOM", patterns: [/\breact-dom\b/i] },
+  { name: "Preact", patterns: [/__PREACT_DEVTOOLS__/, /preact\/hooks/i] },
+  { name: "Vue", patterns: [/__vue__/, /__VUE_DEVTOOLS_GLOBAL_HOOK__/, /Vue\.config/] },
+  { name: "Angular", patterns: [/@angular\/core/i, /ng-version/, /ɵɵ/] },
+  { name: "Svelte", patterns: [/svelte\/internal/i, /__svelte/] },
+  { name: "jQuery", patterns: [/jQuery\.fn\.jquery/, /\.jquery\b/] },
+
+  // --- State management ---
+  { name: "Redux", patterns: [/@@redux\/INIT/, /PROBE_UNKNOWN_ACTION/] },
+  { name: "Redux Toolkit", patterns: [/@reduxjs\/toolkit/i, /createAsyncThunk/] },
+  { name: "Immer", patterns: [/immerable/, /\[Immer\]/] },
+  { name: "MobX", patterns: [/\$mobx/, /__mobxInstanceCount/] },
+  { name: "Zustand", patterns: [/zustand/i] },
+  { name: "Recoil", patterns: [/RecoilRoot/, /recoil_values/] },
+  { name: "Jotai", patterns: [/jotai/i] },
+  { name: "RxJS", patterns: [/\brxjs\b/i, /Rx\.Observable/] },
+
+  // --- Data fetching ---
+  { name: "Axios", patterns: [/AxiosError/, /\baxios\b/i] },
+  { name: "GraphQL", patterns: [/GraphQLError/, /\bgraphql\b/i] },
+  { name: "Apollo Client", patterns: [/@apollo\/client/i, /ApolloClient/] },
+  { name: "TanStack Query", patterns: [/@tanstack\/(?:react-)?query/i, /QueryClientProvider/] },
+  { name: "SWR", patterns: [/\bswr\b/, /useSWR/] },
+
+  // --- Dates / utilities ---
+  { name: "Lodash", patterns: [/lodash/i, /\b_\.VERSION\b/] },
+  { name: "Underscore", patterns: [/underscore\.js/i] },
+  { name: "Moment.js", patterns: [/moment\.js/i, /__moment__/, /moment\.fn/] },
+  { name: "date-fns", patterns: [/date-fns/i] },
+  { name: "Luxon", patterns: [/Invalid DateTime/, /\bluxon\b/i] },
+  { name: "Day.js", patterns: [/\bdayjs\b/i] },
+
+  // --- Visualization / animation ---
+  { name: "D3", patterns: [/d3\.version/, /d3-selection/i] },
+  { name: "Three.js", patterns: [/THREE\.[A-Z]/, /WebGLRenderer/] },
+  { name: "Chart.js", patterns: [/chart\.js/i, /Chart\.register/] },
+  { name: "GSAP", patterns: [/\bgsap\b/i, /TweenMax/, /TweenLite/] },
+  { name: "Framer Motion", patterns: [/framerAppearId/, /AnimatePresence/] },
+  { name: "Lottie", patterns: [/lottie/i] },
+
+  // --- Internationalization ---
+  { name: "i18next", patterns: [/i18next/] },
+  { name: "react-i18next", patterns: [/react-i18next/] },
+
+  // --- Validation / forms ---
+  { name: "Zod", patterns: [/ZodError/, /invalid_type/] },
+  { name: "Yup", patterns: [/yup\/lib/, /ValidationError.*\byup\b/] },
+  { name: "Formik", patterns: [/\bformik\b/i] },
+  { name: "React Hook Form", patterns: [/react-hook-form/i] },
+
+  // --- Styling ---
+  { name: "styled-components", patterns: [/styled-components/i, /sc-component-id/, /__sc_/] },
+  { name: "Emotion", patterns: [/@emotion/i, /data-emotion/, /__emotion_/] },
+  { name: "Tailwind CSS", patterns: [/tailwindcss/i] },
+  { name: "Material UI", patterns: [/@mui\//i, /MuiButton/] },
+  { name: "Chakra UI", patterns: [/chakra-ui/i] },
+
+  // --- Security / sanitization ---
+  { name: "DOMPurify", patterns: [/dompurify/i, /DOMPurify/] },
+  { name: "sanitize-html", patterns: [/sanitize-html/i] },
+
+  // --- Telemetry / auth / SDKs ---
+  { name: "Sentry", patterns: [/@sentry\//i, /__SENTRY__/] },
+  { name: "Application Insights", patterns: [/ApplicationInsights/, /InstrumentationKey/] },
+  { name: "MSAL", patterns: [/@azure\/msal/i, /msal\.js/] },
+  { name: "SignalR", patterns: [/@microsoft\/signalr/i] },
+  { name: "Firebase", patterns: [/firebaseapp\.com/i, /@firebase\//] },
+  { name: "Stripe", patterns: [/js\.stripe\.com/i, /Stripe\(/] },
+  { name: "web-vitals", patterns: [/web-vitals/] },
+
+  // --- Transpiler / polyfill runtimes ---
+  { name: "core-js", patterns: [/core-js/i] },
+  { name: "regenerator-runtime", patterns: [/regeneratorRuntime/] },
+  { name: "tslib", patterns: [/__awaiter\b/, /__generator\b/, /__esDecorate\b/] },
+
+  // --- Build / debug metadata ---
+  { name: "Source maps", patterns: [/sourceMappingURL/, /"mappings":/] },
+];
+
 function handleLibraries(str){
   let libs = {};
 
-  if (str.startsWith("R0lGOD")) {
-    libs.base64gif = true;
+  for (const sig of BODY_TYPE_SIGNATURES) {
+    if (str.startsWith(sig.prefix)) {
+      libs[sig.name] = true;
+    }
   }
 
-  if (str.startsWith("iVBOR")) {
-    libs.base64png = true;
-  }
-
-  if (str.startsWith("/9j/")) {
-    libs.base64jpg = true;
-  }
-
-  if (str.startsWith("eyJ")) {
-    libs.json = true;
-  }
-
-  if (str.startsWith("PD94")) {
-    libs.base64xml = true;
-  }
-
-  if (str.startsWith("MII")) {
-    libs.base64cert = true;
-  }
-
-  if (str.match(/react.production.min.js/)) {
-    libs.react = true;
-  }
-
-  if (str.match(/__REACT_DEVTOOLS_GLOBAL_HOOK__/)){
-    libs.react = true
-  }
-
-  if(str.match(/lodash.*\.js/)){
-    libs.lodash = true;
-  }
-
-  if(str.match(/https:\/\/reactjs\.org\/docs\//)){
-    libs.react = true;
-  }
-
-  if (str.toLowerCase().includes("lottie")) {
-    libs.lottie = true;
-  }
-
-  if (str.toLowerCase().includes("purify")) {
-    libs.domPurify = true;
-  }
-
-  if (str.match(/\.Motion\b/)) {
-    libs.motion = true;
-  }
-
-  if (str.match(/mappings:/)) {
-    libs.sourcemaps = true;
+  for (const sig of LIBRARY_SIGNATURES) {
+    if (sig.patterns.some((re) => re.test(str))) {
+      libs[sig.name] = true;
+    }
   }
 
   return libs;
