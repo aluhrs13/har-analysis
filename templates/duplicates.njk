@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>HAR Analysis - Duplicates</title>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+        margin: 0;
+        padding: 20px;
+        color: #333;
+        background-color: #f8f9fa;
+      }
+      .container {
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+      h1 {
+        text-align: center;
+        margin-bottom: 6px;
+        color: #2c3e50;
+      }
+      .subtitle {
+        text-align: center;
+        color: #6c757d;
+        margin-bottom: 20px;
+      }
+      .nav {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      .nav a {
+        margin: 0 10px;
+        color: #0066cc;
+        text-decoration: none;
+        font-weight: 500;
+      }
+      .card {
+        background: #fff;
+        border-radius: 6px;
+        box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        padding: 20px;
+        margin-bottom: 24px;
+      }
+      h2 {
+        color: #2c3e50;
+        margin-top: 0;
+      }
+      .stats {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 24px;
+        justify-content: center;
+      }
+      .stat {
+        text-align: center;
+        min-width: 140px;
+      }
+      .stat .value {
+        font-size: 28px;
+        font-weight: 700;
+        color: #c0392b;
+      }
+      .stat .label {
+        font-size: 13px;
+        color: #6c757d;
+      }
+      .dup-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+        margin-top: 16px;
+      }
+      .dup-item {
+        border: 1px solid #e1e4e8;
+        border-radius: 6px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+      }
+      .dup-preview {
+        height: 120px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fafbfc;
+        border-radius: 4px;
+        overflow: hidden;
+        margin-bottom: 10px;
+      }
+      .dup-preview img {
+        max-width: 100%;
+        max-height: 120px;
+      }
+      .dup-preview svg.svg-autofit {
+        width: 100%;
+        height: 100px;
+        display: block;
+        color: #333;
+      }
+      .dup-preview svg {
+        max-width: 100%;
+        max-height: 120px;
+      }
+      .dup-preview audio {
+        width: 100%;
+      }
+      .badge {
+        display: inline-block;
+        background: #c0392b;
+        color: #fff;
+        border-radius: 10px;
+        padding: 1px 9px;
+        font-size: 12px;
+        font-weight: 700;
+        margin-right: 6px;
+      }
+      .badge.cross {
+        background: #8e44ad;
+      }
+      .badge.same {
+        background: #95a5a6;
+      }
+      .dup-meta {
+        font-size: 13px;
+        color: #444;
+      }
+      .dup-meta .type {
+        color: #6c757d;
+        text-transform: uppercase;
+        font-size: 11px;
+        letter-spacing: 0.04em;
+      }
+      .dup-files {
+        margin: 8px 0 0;
+        padding-left: 18px;
+        font-size: 12px;
+      }
+      .dup-files a {
+        color: #0066cc;
+        text-decoration: none;
+        word-break: break-all;
+      }
+      .data-asset {
+        display: inline-block;
+        padding: 8px 10px;
+        background: #f0f0f0;
+        border-radius: 4px;
+        text-decoration: none;
+        color: #0066cc;
+        word-break: break-all;
+      }
+      .lib-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+      }
+      .lib-list li {
+        padding: 10px 0;
+        border-bottom: 1px solid #eee;
+      }
+      .lib-list li:last-child {
+        border-bottom: none;
+      }
+      .lib-name {
+        font-weight: 600;
+        color: #2c3e50;
+      }
+      .lib-bundles {
+        margin: 6px 0 0;
+        padding-left: 18px;
+        font-size: 13px;
+      }
+      .lib-bundles a {
+        color: #0066cc;
+        text-decoration: none;
+        word-break: break-all;
+      }
+      .empty {
+        color: #6c757d;
+        font-style: italic;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>Duplicates &amp; Redundancy</h1>
+      <p class="subtitle">
+        Identical assets shipped more than once and libraries bundled into
+        multiple chunks on this page load.
+      </p>
+      <div class="nav">
+        <a href="/">&larr; Dashboard</a>
+        <a href="/gallery">Image Gallery</a>
+        <a href="/composition">Bundle Composition</a>
+      </div>
+
+      <div class="card">
+        <div class="stats">
+          <div class="stat">
+            <div class="value">{{ duplicates.assetGroupCount }}</div>
+            <div class="label">duplicated assets</div>
+          </div>
+          <div class="stat">
+            <div class="value">{{ duplicates.duplicateInstances }}</div>
+            <div class="label">redundant copies</div>
+          </div>
+          <div class="stat">
+            <div class="value">{{ (duplicates.wastedAssetBytes / 1024) | round(1) }} KB</div>
+            <div class="label">wasted on duplicate assets</div>
+          </div>
+          <div class="stat">
+            <div class="value">{{ duplicates.dupLibs | length }}</div>
+            <div class="label">libraries in multiple bundles</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Duplicate Assets</h2>
+        {% if duplicates.dupAssets | length == 0 %}
+          <p class="empty">No duplicated embedded assets found. Nice.</p>
+        {% else %}
+        <div class="dup-grid">
+          {% for g in duplicates.dupAssets %}
+          <div class="dup-item">
+            <div class="dup-preview">
+              {% if g.type == "base64_image" %}
+                <img src="{{ g.content }}" alt="duplicate asset" />
+              {% elif g.type == "base64_audio" %}
+                <audio controls preload="none" src="{{ g.content }}"></audio>
+              {% elif g.type == "base64_video" %}
+                <video controls preload="none" src="{{ g.content }}" style="max-width:100%; max-height:120px;"></video>
+              {% elif g.type == "base64_data" %}
+                <a class="data-asset" href="{{ g.content }}" download>&#11015; {{ g.mediaType }}</a>
+              {% else %}
+                {{ g.content | safe }}
+              {% endif %}
+            </div>
+            <div class="dup-meta">
+              <span class="badge">{{ g.count }}&times;</span>
+              {% if g.crossFile %}
+                <span class="badge cross">cross-bundle</span>
+              {% else %}
+                <span class="badge same">same bundle</span>
+              {% endif %}
+              <div class="type">{{ g.type }}</div>
+              {{ (g.size / 1024) | round(2) }} KB each &middot;
+              wastes {{ (g.wasted / 1024) | round(2) }} KB
+              <ul class="dup-files">
+                {% for occ in g.occurrences %}
+                <li>
+                  <a href="/pages/{{ occ.id }}" title="{{ occ.url }}">{{ occ.url }}</a>
+                  {% if occ.count > 1 %}<strong>({{ occ.count }}&times;)</strong>{% endif %}
+                </li>
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="card">
+        <h2>Libraries in Multiple Bundles</h2>
+        {% if duplicates.dupLibs | length == 0 %}
+          <p class="empty">No library appears in more than one JS bundle.</p>
+        {% else %}
+        <ul class="lib-list">
+          {% for lib in duplicates.dupLibs %}
+          <li>
+            <span class="lib-name">{{ lib.name }}</span>
+            <span class="badge cross">{{ lib.count }} bundles</span>
+            <ul class="lib-bundles">
+              {% for b in lib.bundles %}
+              <li><a href="/pages/{{ b.id }}" title="{{ b.url }}">{{ b.url }}</a></li>
+              {% endfor %}
+            </ul>
+          </li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        // Frame each discovered SVG path tightly using its real geometry. The
+        // build emits a placeholder viewBox; the browser knows the true bounds.
+        function fit(svg) {
+          var p = svg.querySelector("path");
+          if (!p) return;
+          var bb;
+          try {
+            bb = p.getBBox();
+          } catch (e) {
+            return;
+          }
+          if (
+            !bb ||
+            !isFinite(bb.width) ||
+            !isFinite(bb.height) ||
+            bb.width === 0 ||
+            bb.height === 0
+          ) {
+            return;
+          }
+          var pad = Math.max(bb.width, bb.height) * 0.08;
+          svg.setAttribute(
+            "viewBox",
+            bb.x - pad +
+              " " +
+              (bb.y - pad) +
+              " " +
+              (bb.width + 2 * pad) +
+              " " +
+              (bb.height + 2 * pad)
+          );
+        }
+        function run() {
+          var list = document.querySelectorAll("svg.svg-autofit");
+          for (var i = 0; i < list.length; i++) fit(list[i]);
+        }
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", run);
+        } else {
+          run();
+        }
+      })();
+    </script>
+  </body>
+</html>

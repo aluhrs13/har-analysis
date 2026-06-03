@@ -674,7 +674,134 @@ function buildComposition(files) {
   };
 }
 
-async function generatePages(requestsData, outputFolder, composition) {
+// Derives a stable identity + shipped-size for an embedded asset so identical
+// assets can be grouped across (and within) bundles. For SVG paths the "shipped"
+// representation is the path's `d` string (what actually lives in the source),
+// not the synthesized <svg> wrapper we render with.
+function assetIdentity(img) {
+  if (!img || typeof img.content !== "string") {
+    return null;
+  }
+  if (img.type === "svg_path") {
+    const m = img.content.match(/ d="([^"]*)"/);
+    const d = m ? m[1] : img.content;
+    return { key: "svg_path|" + d, size: Buffer.byteLength(d, "utf8") };
+  }
+  return {
+    key: img.type + "|" + img.content,
+    size: Buffer.byteLength(img.content, "utf8"),
+  };
+}
+
+// Labels produced by handleLibraries that describe the response body itself
+// rather than a bundled third-party library; excluded from duplicate-library
+// analysis.
+const NON_LIBRARY_LABELS = new Set([
+  "Base64 GIF",
+  "Base64 PNG",
+  "Base64 JPEG",
+  "Base64 JSON",
+  "Base64 XML",
+  "Base64 Certificate",
+  "Source maps",
+]);
+
+// Finds redundancy across the captured page load: identical embedded assets
+// shipped more than once (within or across bundles), and libraries that appear
+// in more than one JS bundle. Both indicate wasted bytes / duplicate bundling.
+function buildDuplicates(files) {
+  // --- Duplicate embedded assets ---
+  const groups = new Map();
+  for (const f of files) {
+    if (!f.jsAnalysis || !Array.isArray(f.jsAnalysis.images)) {
+      continue;
+    }
+    for (const img of f.jsAnalysis.images) {
+      const idy = assetIdentity(img);
+      if (!idy) {
+        continue;
+      }
+      let g = groups.get(idy.key);
+      if (!g) {
+        g = {
+          type: img.type,
+          content: img.content,
+          mediaType: img.mediaType,
+          size: idy.size,
+          count: 0,
+          occurrences: new Map(),
+        };
+        groups.set(idy.key, g);
+      }
+      g.count += 1;
+      let occ = g.occurrences.get(f.id);
+      if (!occ) {
+        occ = { id: f.id, url: f.url, count: 0 };
+        g.occurrences.set(f.id, occ);
+      }
+      occ.count += 1;
+    }
+  }
+
+  const dupAssets = [];
+  let wastedAssetBytes = 0;
+  for (const g of groups.values()) {
+    if (g.count < 2) {
+      continue;
+    }
+    const wasted = g.size * (g.count - 1);
+    wastedAssetBytes += wasted;
+    dupAssets.push({
+      type: g.type,
+      content: g.content,
+      mediaType: g.mediaType,
+      size: g.size,
+      count: g.count,
+      wasted,
+      crossFile: g.occurrences.size > 1,
+      occurrences: Array.from(g.occurrences.values()).sort(
+        (a, b) => b.count - a.count
+      ),
+    });
+  }
+  dupAssets.sort((a, b) => b.wasted - a.wasted || b.count - a.count);
+
+  // --- Libraries appearing in more than one JS bundle ---
+  const libMap = new Map();
+  for (const f of files) {
+    if (f.extension !== "js" || !f.libraryInfo) {
+      continue;
+    }
+    for (const name of Object.keys(f.libraryInfo)) {
+      if (!f.libraryInfo[name] || NON_LIBRARY_LABELS.has(name)) {
+        continue;
+      }
+      if (!libMap.has(name)) {
+        libMap.set(name, []);
+      }
+      libMap.get(name).push({ id: f.id, url: f.url });
+    }
+  }
+
+  const dupLibs = [];
+  for (const [name, bundles] of libMap.entries()) {
+    if (bundles.length < 2) {
+      continue;
+    }
+    dupLibs.push({ name, count: bundles.length, bundles });
+  }
+  dupLibs.sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+  return {
+    dupAssets,
+    dupLibs,
+    wastedAssetBytes,
+    assetGroupCount: dupAssets.length,
+    duplicateInstances: dupAssets.reduce((n, g) => n + (g.count - 1), 0),
+  };
+}
+
+async function generatePages(requestsData, outputFolder, composition, duplicates) {
   // Create the output folder if it doesn't exist
   if (!fs.existsSync(path.join(outputFolder, "ssg", "pages"))) {
     fs.mkdirSync(path.join(outputFolder, "ssg", "pages"), { recursive: true });
@@ -704,6 +831,13 @@ async function generatePages(requestsData, outputFolder, composition) {
     composition: composition,
   });
   await fs.promises.writeFile(compositionPath, compositionHtml);
+
+  // Render the duplicates / redundancy report
+  const duplicatesPath = path.join(outputFolder, "ssg", "duplicates.html");
+  const duplicatesHtml = nunjucks.render("duplicates.njk", {
+    duplicates: duplicates,
+  });
+  await fs.promises.writeFile(duplicatesPath, duplicatesHtml);
 
   await Promise.all(
     requestsData.map(async (request) => {
@@ -768,6 +902,7 @@ nunjucks.configure(path.join(__dirname, "templates"), {
   );
 
   const composition = buildComposition(files);
+  const duplicates = buildDuplicates(files);
 
-  await generatePages(files, outputFolder, composition);
+  await generatePages(files, outputFolder, composition, duplicates);
 })();
