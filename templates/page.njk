@@ -216,6 +216,12 @@
             <img
               src="{{ image.content }}"
               alt="Image from request" />
+            {% elif image.type == "base64_audio" %}
+            <audio controls preload="none" src="{{ image.content }}"></audio>
+            {% elif image.type == "base64_video" %}
+            <video controls preload="none" src="{{ image.content }}" style="max-width:100%; max-height:100%;"></video>
+            {% elif image.type == "base64_data" %}
+            <a class="data-asset" href="{{ image.content }}" download>⬇ {{ image.mediaType }}</a>
             {% else %}
              {{ image.content | safe }}
             {% endif %}

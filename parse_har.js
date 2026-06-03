@@ -60,33 +60,48 @@ function handlePathsInJS(str) {
   return null;
 }
 
-function handleBase64Images(str) {
-  // Check for direct base64 data - supporting optional charset parameter
-  let isBase64 =
-    /^data:image\/(png|jpeg|jpg|gif|svg\+xml)(?:;charset=[^;]+)?;base64,/.test(
-      str
-    );
+// Matches a base64 data URI of any media type, optionally wrapped in CSS url(...).
+// Captures: 1=full data URI, 2=mime type (e.g. "audio/mpeg", "image/avif").
+const DATA_URI_RE =
+  /(data:([a-z0-9.+-]+\/[a-z0-9.+-]+)(?:;[a-z0-9.+-]+=[^;,'"`)\s]+)*;base64,[A-Za-z0-9+/=]+)/i;
 
-  // Check for CSS url() pattern - supporting optional charset parameter
+// Maps a media type to how the gallery should render it.
+function assetTypeForMime(mime) {
+  const m = mime.toLowerCase();
+  if (m.startsWith("image/")) return "base64_image";
+  if (m.startsWith("audio/")) return "base64_audio";
+  if (m.startsWith("video/")) return "base64_video";
+  return "base64_data"; // application/json, fonts, octet-stream, etc.
+}
+
+// Detects any base64-encoded data URI (images, audio, video, JSON, fonts, ...).
+// Previously this only recognized a fixed list of image formats; it now surfaces
+// every embedded base64 resource so things like data:audio/mpeg clips show up.
+function handleDataUri(str) {
+  // Prefer a CSS url(...) wrapper if present, otherwise match a bare data URI.
   const urlMatch = str.match(
-    /url\(['"]?(data:image\/(png|jpeg|jpg|gif|svg\+xml)(?:;charset=[^;]+)?;base64,[^'"]+)['"]?\)/i
+    /url\(\s*['"]?\s*(data:[a-z0-9.+-]+\/[a-z0-9.+-]+(?:;[a-z0-9.+-]+=[^;,'"`)\s]+)*;base64,[A-Za-z0-9+/=]+)\s*['"]?\s*\)/i
   );
-  if (urlMatch) {
-    isBase64 = true;
-    str = urlMatch[1]; // Extract the data URL from inside url()
+  const dataUri = urlMatch ? urlMatch[1] : null;
+
+  let match;
+  if (dataUri) {
+    match = dataUri.match(DATA_URI_RE);
+  } else {
+    // Only treat as an asset when the whole string is the data URI, to avoid
+    // false positives from prose that merely mentions a data URI.
+    match = str.match(
+      new RegExp("^" + DATA_URI_RE.source + "$", "i")
+    );
   }
 
-  if (isBase64) {
-    // Modified regex to capture format with optional charset parameter
-    const matches = str.match(
-      /data:image\/(png|jpeg|jpg|gif|svg\+xml)(?:;charset=[^;]+)?;base64,(.+)$/
-    );
-    if (matches) {
-      return {
-        type: "base64_image",
-        content: str,
-      };
-    }
+  if (match) {
+    const mediaType = match[2].toLowerCase();
+    return {
+      type: assetTypeForMime(mediaType),
+      content: match[1],
+      mediaType,
+    };
   }
   return null;
 }
@@ -238,7 +253,33 @@ function computeBundleBytes(source) {
         const trimmed = node.value.trim();
         const isImage =
           !!handlePathsInJS(trimmed) ||
-          !!handleBase64Images(trimmed) ||
+          !!handleDataUri(trimmed) ||
+          !!handleInlineSVGs(trimmed);
+        if (isImage) {
+          imageBytes += spanBytes;
+        } else {
+          stringBytes += spanBytes;
+        }
+      },
+      TemplateLiteral(node) {
+        // Mirror the analyzeFile walk: attribute static (non-interpolated)
+        // template literal spans too. Single-quasi templates contain no nested
+        // Literal nodes, so their spans never overlap other counted nodes.
+        if (node.expressions.length !== 0 || node.quasis.length !== 1) {
+          return;
+        }
+        const cooked = node.quasis[0].value.cooked;
+        if (typeof cooked !== "string" || cooked === "") {
+          return;
+        }
+        const spanBytes = Buffer.byteLength(
+          source.slice(node.start, node.end),
+          "utf8"
+        );
+        const trimmed = cooked.trim();
+        const isImage =
+          !!handlePathsInJS(trimmed) ||
+          !!handleDataUri(trimmed) ||
           !!handleInlineSVGs(trimmed);
         if (isImage) {
           imageBytes += spanBytes;
@@ -274,34 +315,53 @@ function analyzeFile(filePath) {
       strict: false,
     });
 
+    // Shared per-string analysis so both plain string literals and (single-quasi)
+    // template literals are scanned. Minified bundlers like rolldown/esbuild emit
+    // strings as template literals (backticks), so icon path data, base64 images,
+    // and inline SVGs frequently live in TemplateLiteral nodes, not Literal nodes.
+    const processString = (rawStr) => {
+      const trimmedStr = rawStr.trim();
+      if (trimmedStr === "") return;
+
+      const svgPathResult = handlePathsInJS(trimmedStr);
+      if (svgPathResult) {
+        imagesList.push(svgPathResult);
+        count_paths_in_js++;
+      }
+
+      const base64Result = handleDataUri(trimmedStr);
+      if (base64Result) {
+        imagesList.push(base64Result);
+        count_base64_images++;
+      }
+
+      const inlineSvgResult = handleInlineSVGs(trimmedStr);
+      if (inlineSvgResult) {
+        imagesList.push(inlineSvgResult);
+        count_inline_svgs++;
+      }
+
+      if (!svgPathResult && !base64Result && !inlineSvgResult) {
+        literalsList.push(trimmedStr);
+        otherLiteralsLength += trimmedStr.length;
+      }
+    };
+
     walk.simple(ast, {
       Literal(node) {
         if (node.value != null && node.value !== "") {
           if (typeof node.value === "string") {
-            const trimmedStr = node.value.trim();
-
-            const svgPathResult = handlePathsInJS(trimmedStr);
-            if (svgPathResult) {
-              imagesList.push(svgPathResult);
-              count_paths_in_js++;
-            }
-
-            const base64Result = handleBase64Images(trimmedStr);
-            if (base64Result) {
-              imagesList.push(base64Result);
-              count_base64_images++;
-            }
-
-            const inlineSvgResult = handleInlineSVGs(trimmedStr);
-            if (inlineSvgResult) {
-              imagesList.push(inlineSvgResult);
-              count_inline_svgs++;
-            }
-
-            if (!svgPathResult && !base64Result && !inlineSvgResult) {
-              literalsList.push(trimmedStr);
-              otherLiteralsLength += trimmedStr.length;
-            }
+            processString(node.value);
+          }
+        }
+      },
+      TemplateLiteral(node) {
+        // Only static templates with no interpolation. These contain no nested
+        // Literal nodes, so there's no risk of double-scanning.
+        if (node.expressions.length === 0 && node.quasis.length === 1) {
+          const cooked = node.quasis[0].value.cooked;
+          if (typeof cooked === "string" && cooked !== "") {
+            processString(cooked);
           }
         }
       },
