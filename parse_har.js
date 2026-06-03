@@ -133,7 +133,7 @@ const BODY_TYPE_SIGNATURES = [
 // case-sensitively; generic package names are matched case-insensitively.
 const LIBRARY_SIGNATURES = [
   // --- View / UI frameworks ---
-  { name: "React", patterns: [/__REACT_DEVTOOLS_GLOBAL_HOOK__/, /react\.production\.min/i, /reactjs\.org\/docs\/error-decoder/i, /__SECRET_INTERNALS_DO_NOT_USE/, /Minified React error/i] },
+  { name: "React", patterns: [/__REACT_DEVTOOLS_GLOBAL_HOOK__/, /react\.production\.min/i, /reactjs\.org\/docs\/error-decoder/i, /__SECRET_INTERNALS_DO_NOT_USE/] },
   { name: "ReactDOM", patterns: [/\breact-dom\b/i] },
   { name: "Preact", patterns: [/__PREACT_DEVTOOLS__/, /preact\/hooks/i] },
   { name: "Vue", patterns: [/__vue__/, /__VUE_DEVTOOLS_GLOBAL_HOOK__/, /Vue\.config/] },
