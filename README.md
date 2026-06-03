@@ -10,7 +10,7 @@ npm install
 node .\parse_har.js <path to HAR file>.har
 ```
 
-`.\output\<HAR name>` will contain two folders - `responses` contains all the responses parsed from the HAR file, and `ssg` contains statically generated pages describing each. Run 
+`.\output\<HAR name>` will contain `requests.json` (the raw parsed data) and an `ssg` folder of statically generated pages. Inside `ssg` you'll find `index.html`, `gallery.html`, a `pages` folder with a detail page per request, and a `responses` folder containing all the response bodies parsed from the HAR file. Run
 
 ```
 serve .\output\<HAR name>\ssg

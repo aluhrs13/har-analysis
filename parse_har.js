@@ -140,7 +140,7 @@ function handleLibraries(str){
     libs.react = true
   }
 
-  if(str.match(/lodash.*\\.js/)){
+  if(str.match(/lodash.*\.js/)){
     libs.lodash = true;
   }
 
@@ -174,12 +174,12 @@ function analyzeFile(filePath) {
 
   //TODO: Code Comments
   //TODO: Sourcemaps
-  count_base64_images = 0;
-  count_paths_in_js = 0;
-  count_inline_svgs = 0;
-  literalsList = [];
-  imagesList = [];
-  otherLiteralsLength = 0;
+  let count_base64_images = 0;
+  let count_paths_in_js = 0;
+  let count_inline_svgs = 0;
+  const literalsList = [];
+  const imagesList = [];
+  let otherLiteralsLength = 0;
 
   try {
     const ast = acorn.parse(fileContent, {
@@ -194,28 +194,19 @@ function analyzeFile(filePath) {
           if (typeof node.value === "string") {
             const trimmedStr = node.value.trim();
 
-            const svgPathResult = handlePathsInJS(
-              trimmedStr,
-              count_paths_in_js
-            );
+            const svgPathResult = handlePathsInJS(trimmedStr);
             if (svgPathResult) {
               imagesList.push(svgPathResult);
               count_paths_in_js++;
             }
 
-            const base64Result = handleBase64Images(
-              trimmedStr,
-              count_base64_images
-            );
+            const base64Result = handleBase64Images(trimmedStr);
             if (base64Result) {
               imagesList.push(base64Result);
               count_base64_images++;
             }
 
-            const inlineSvgResult = handleInlineSVGs(
-              trimmedStr,
-              count_inline_svgs
-            );
+            const inlineSvgResult = handleInlineSVGs(trimmedStr);
             if (inlineSvgResult) {
               imagesList.push(inlineSvgResult);
               count_inline_svgs++;
@@ -273,7 +264,9 @@ async function parseHarFile(harFilePath, responsesFolder) {
      *
      *
      */
-    first_page_id = harData.log.pages[0].id;
+    const pages = harData.log.pages;
+    const first_page_id =
+      pages && pages.length > 0 ? pages[0].id : null;
 
     const entries = harData.log.entries;
     const outputData = [];
@@ -282,11 +275,15 @@ async function parseHarFile(harFilePath, responsesFolder) {
       const request = entry.request;
       const response = entry.response;
 
-      if (request.method !== "GET" || entry.pageref !== first_page_id) {
+      // When the HAR has page metadata, restrict to the first page. Otherwise
+      // (no pages defined) fall back to processing every GET entry.
+      const matchesFirstPage =
+        first_page_id == null || entry.pageref === first_page_id;
+      if (request.method !== "GET" || !matchesFirstPage) {
         continue;
       }
 
-      req = {
+      const req = {
         id: entry._id,
         url: request.url,
         mimeType: response.content.mimeType,
@@ -316,6 +313,7 @@ async function parseHarFile(harFilePath, responsesFolder) {
           "image/gif": "gif",
           "application/xml": "xml",
           "text/xml": "xml",
+          "application/manifest+json": "json",
           "application/graphql-response+json": "json"
         };
 
@@ -334,23 +332,20 @@ async function parseHarFile(harFilePath, responsesFolder) {
         const responseFilePath = path.join(responsesFolder, responseFileName);
         let formattedContent = response.content.text;
 
-        // Try to format content with Prettier if the file type is supported
-        // Behind a tautical if because it can be slow.
-        if (true){
-          try {
-            // Only format files Prettier can handle
-            if (
-              ["js", "json", "css", "html", "svg", "xml"].includes(extension)
-            ) {
-              formattedContent = await prettier.format(response.content.text, {
-                filepath: responseFilePath, // Let Prettier infer parser from file path
-              });
-            }
-          } catch (error) {
-            console.log(
-              `Could not format ${responseFileName}: ${error.message}`
-            );
+        // Try to format content with Prettier if the file type is supported.
+        try {
+          // Only format files Prettier can handle
+          if (
+            ["js", "json", "css", "html", "svg", "xml"].includes(extension)
+          ) {
+            formattedContent = await prettier.format(response.content.text, {
+              filepath: responseFilePath, // Let Prettier infer parser from file path
+            });
           }
+        } catch (error) {
+          console.log(
+            `Could not format ${responseFileName}: ${error.message}`
+          );
         }
 
         fs.writeFileSync(responseFilePath, formattedContent, "utf8");
@@ -395,18 +390,20 @@ async function generatePages(requestsData, outputFolder) {
 
   await fs.promises.writeFile(outputPath3, html3);
 
-  requestsData.forEach(async (request) => {
-    const html2 = nunjucks.render("page.njk", {
-      request: request,
-    });
-    const outputPath2 = path.join(
-      outputFolder,
-      "ssg",
-      "pages",
-      request.id + ".html"
-    );
-    await fs.promises.writeFile(outputPath2, html2);
-  });
+  await Promise.all(
+    requestsData.map(async (request) => {
+      const html2 = nunjucks.render("page.njk", {
+        request: request,
+      });
+      const outputPath2 = path.join(
+        outputFolder,
+        "ssg",
+        "pages",
+        request.id + ".html"
+      );
+      await fs.promises.writeFile(outputPath2, html2);
+    })
+  );
 }
 
 nunjucks.configure(path.join(__dirname, "templates"), {
@@ -433,6 +430,11 @@ nunjucks.configure(path.join(__dirname, "templates"), {
 
   const files = await parseHarFile(harFile, responsesFolder);
 
+  if (!files) {
+    console.error("Failed to parse HAR file; no output generated.");
+    process.exit(1);
+  }
+
   files.forEach((file) => {
     //TODO: Handle other filetypes
     if (file.hasResponse && file.extension === "js") {
@@ -450,5 +452,5 @@ nunjucks.configure(path.join(__dirname, "templates"), {
     `Successfully wrote ${files.length} requests to ${outputFilePath}`
   );
 
-  generatePages(files, outputFolder);
+  await generatePages(files, outputFolder);
 })();

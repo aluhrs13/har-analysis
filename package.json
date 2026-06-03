@@ -1,13 +1,21 @@
 {
+  "name": "har-analysis",
+  "version": "1.0.0",
+  "description": "Analyzes HAR files with response contents for potential areas of interest in minified JS and other assets.",
+  "license": "MIT",
+  "main": "parse_har.js",
+  "scripts": {
+    "start": "node parse_har.js",
+    "format": "prettier --write \"**/*.{js,njk,json,md}\"",
+    "serve": "serve"
+  },
   "dependencies": {
     "acorn": "^8.14.1",
     "acorn-walk": "^8.3.4",
-    "express": "^5.1.0",
-    "fs-extra": "^11.3.0",
-    "nunjucks": "^3.2.4"
+    "nunjucks": "^3.2.4",
+    "prettier": "^3.5.3"
   },
   "devDependencies": {
-    "prettier": "^3.5.3",
     "serve": "^14.2.4"
   }
 }
