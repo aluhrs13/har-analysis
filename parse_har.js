@@ -167,6 +167,92 @@ function handleLibraries(str){
   return libs;
 }
 
+// Returns the decoded byte length of a HAR response body, honoring base64
+// encoding so binary/base64 entries aren't measured as their base64 text.
+function decodedBodyBytes(content) {
+  if (!content || !content.text) {
+    return 0;
+  }
+  if (content.encoding === "base64") {
+    try {
+      return Buffer.from(content.text, "base64").length;
+    } catch (e) {
+      return Buffer.byteLength(content.text, "utf8");
+    }
+  }
+  return Buffer.byteLength(content.text, "utf8");
+}
+
+// Maps a request to a coarse composition category for the page-level treemap.
+function categoryForRequest(extension, mimeType) {
+  const mt = (mimeType || "").toLowerCase();
+  switch (extension) {
+    case "js":
+      return "JavaScript";
+    case "css":
+      return "CSS";
+    case "json":
+      return "JSON";
+    case "html":
+      return "HTML";
+    case "svg":
+      return "SVG";
+    case "png":
+    case "jpg":
+    case "gif":
+      return "Images";
+    case "xml":
+      return "XML";
+    case "txt":
+      return "Text";
+  }
+  if (mt.startsWith("image/")) return "Images";
+  if (mt.startsWith("font/") || mt.includes("font")) return "Fonts";
+  return "Other";
+}
+
+// Byte-accurate composition of a JS bundle. Parses the ORIGINAL (pre-Prettier)
+// source and attributes each string literal's *source span* bytes to either
+// embedded-image or other-string buckets using the same detectors as the
+// gallery analysis. Because spans come from the original text, the buckets are
+// guaranteed not to exceed the file's decoded byte size.
+function computeBundleBytes(source) {
+  let imageBytes = 0;
+  let stringBytes = 0;
+  try {
+    const ast = acorn.parse(source, {
+      sourceType: "module",
+      ecmaVersion: 2025,
+      strict: false,
+    });
+
+    walk.simple(ast, {
+      Literal(node) {
+        if (typeof node.value !== "string" || node.value === "") {
+          return;
+        }
+        const spanBytes = Buffer.byteLength(
+          source.slice(node.start, node.end),
+          "utf8"
+        );
+        const trimmed = node.value.trim();
+        const isImage =
+          !!handlePathsInJS(trimmed) ||
+          !!handleBase64Images(trimmed) ||
+          !!handleInlineSVGs(trimmed);
+        if (isImage) {
+          imageBytes += spanBytes;
+        } else {
+          stringBytes += spanBytes;
+        }
+      },
+    });
+  } catch (error) {
+    return null;
+  }
+  return { imageBytes, stringBytes };
+}
+
 function analyzeFile(filePath) {
   const fileName = path.basename(filePath);
   const fileContent = fs.readFileSync(filePath, "utf8");
@@ -324,9 +410,16 @@ async function parseHarFile(harFilePath, responsesFolder) {
         }
 
         req.extension = extension;
+        req.decodedSize = decodedBodyBytes(response.content);
         outputData.push(req);
 
         req.libraryInfo = handleLibraries(response.content.text);
+
+        // Byte-accurate composition for JS bundles, computed on the original
+        // (unformatted) source so segments sum to the decoded file size.
+        if (extension === "js") {
+          req.byteBreakdown = computeBundleBytes(response.content.text);
+        }
 
         const responseFileName = `${entry._id}.${extension}`;
         const responseFilePath = path.join(responsesFolder, responseFileName);
@@ -366,7 +459,113 @@ async function parseHarFile(harFilePath, responsesFolder) {
   }
 }
 
-async function generatePages(requestsData, outputFolder) {
+// Aggregates per-request decoded bytes into a page-level composition summary
+// and a sorted per-bundle breakdown for the composition view.
+function buildComposition(files) {
+  const palette = {
+    JavaScript: "#f0db4f",
+    CSS: "#2965f1",
+    JSON: "#8e44ad",
+    HTML: "#e34c26",
+    SVG: "#ff9800",
+    Images: "#16a085",
+    Fonts: "#c0392b",
+    XML: "#7f8c8d",
+    Text: "#95a5a6",
+    Other: "#bdc3c7",
+  };
+
+  const categories = {};
+  const items = [];
+  let totalBytes = 0;
+
+  for (const f of files) {
+    const bytes = f.decodedSize || 0;
+    if (bytes <= 0) {
+      continue;
+    }
+    const category = categoryForRequest(f.extension, f.mimeType);
+    totalBytes += bytes;
+    if (!categories[category]) {
+      categories[category] = { name: category, bytes: 0, count: 0 };
+    }
+    categories[category].bytes += bytes;
+    categories[category].count += 1;
+    items.push({
+      id: f.id,
+      url: f.url,
+      category,
+      bytes,
+      color: palette[category] || palette.Other,
+    });
+  }
+
+  const categoryList = Object.values(categories)
+    .map((c) => ({
+      ...c,
+      color: palette[c.name] || palette.Other,
+      pct: totalBytes ? (c.bytes / totalBytes) * 100 : 0,
+    }))
+    .sort((a, b) => b.bytes - a.bytes);
+
+  items.sort((a, b) => b.bytes - a.bytes);
+
+  // Per-bundle (JS) breakdown: code vs strings vs embedded images.
+  const bundles = [];
+  for (const f of files) {
+    if (f.extension !== "js") {
+      continue;
+    }
+    const total = f.decodedSize || 0;
+    const bb = f.byteBreakdown;
+    if (!bb) {
+      bundles.push({
+        id: f.id,
+        url: f.url,
+        total,
+        analyzed: false,
+        code: total,
+        strings: 0,
+        images: 0,
+        codePct: 100,
+        stringsPct: 0,
+        imagesPct: 0,
+        mismatch: 0,
+      });
+      continue;
+    }
+    const strings = bb.stringBytes;
+    const images = bb.imageBytes;
+    const accounted = strings + images;
+    const mismatch = accounted > total ? accounted - total : 0;
+    const code = Math.max(0, total - accounted);
+    const denom = code + strings + images || 1;
+    bundles.push({
+      id: f.id,
+      url: f.url,
+      total,
+      analyzed: true,
+      code,
+      strings,
+      images,
+      codePct: (code / denom) * 100,
+      stringsPct: (strings / denom) * 100,
+      imagesPct: (images / denom) * 100,
+      mismatch,
+    });
+  }
+  bundles.sort((a, b) => b.total - a.total);
+
+  return {
+    totalBytes,
+    categories: categoryList,
+    items,
+    bundles,
+    palette,
+  };
+}
+
+async function generatePages(requestsData, outputFolder, composition) {
   // Create the output folder if it doesn't exist
   if (!fs.existsSync(path.join(outputFolder, "ssg", "pages"))) {
     fs.mkdirSync(path.join(outputFolder, "ssg", "pages"), { recursive: true });
@@ -382,13 +581,20 @@ async function generatePages(requestsData, outputFolder) {
 
   await fs.promises.writeFile(outputPath, html);
 
-  // Render the template
+  // Render the gallery
   const outputPath3 = path.join(outputFolder, "ssg", "gallery.html");
   const html3 = nunjucks.render("gallery.njk", {
     requests: requestsData,
   });
 
   await fs.promises.writeFile(outputPath3, html3);
+
+  // Render the composition view
+  const compositionPath = path.join(outputFolder, "ssg", "composition.html");
+  const compositionHtml = nunjucks.render("composition.njk", {
+    composition: composition,
+  });
+  await fs.promises.writeFile(compositionPath, compositionHtml);
 
   await Promise.all(
     requestsData.map(async (request) => {
@@ -452,5 +658,7 @@ nunjucks.configure(path.join(__dirname, "templates"), {
     `Successfully wrote ${files.length} requests to ${outputFilePath}`
   );
 
-  await generatePages(files, outputFolder);
+  const composition = buildComposition(files);
+
+  await generatePages(files, outputFolder, composition);
 })();
